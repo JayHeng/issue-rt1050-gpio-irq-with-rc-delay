@@ -34,6 +34,10 @@ static void delay_1s(void);
 /*******************************************************************************
  * Variables
  ******************************************************************************/
+#define MAX_RECORD_BUFFER (0x1000)
+
+uint32_t s_systickReloadVal = 0;
+uint32_t s_curSystickVal[MAX_RECORD_BUFFER];
 
 volatile uint32_t s_inputNormalPinIrqCount   = 0;
 volatile uint32_t s_inputRcPinIrqCount   = 0;
@@ -56,6 +60,10 @@ void GPIO1_Combined_16_31_IRQHandler(void)
      /* clear the interrupt status */
     if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
     {
+        if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
+        {
+            s_curSystickVal[s_inputRcPinIrqCount] = SysTick->VAL;
+        }
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
         s_inputRcPinIrqCount++;
         __DSB();
@@ -114,7 +122,8 @@ void test_gpio_irq(void)
     s_inputNormalPinIrqCount   = 0;
 
     /* Set systick reload value to generate 1ms interrupt */
-    if (SysTick_Config(SystemCoreClock / 1000U))
+    s_systickReloadVal = SystemCoreClock / 1000U;
+    if (SysTick_Config(s_systickReloadVal))
     {
         while (1)
         {
