@@ -8,6 +8,7 @@
 #include "fsl_debug_console.h"
 #include "lvgl_support.h"
 #include "pin_mux.h"
+#include "fsl_iomuxc.h"
 #include "board.h"
 #include "lvgl.h"
 #include "demos/lv_demos.h"
@@ -30,6 +31,11 @@
  ******************************************************************************/
 static volatile uint32_t s_tick        = 0U;
 static volatile bool s_lvglTaskPending = false;
+
+volatile uint32_t s_inputNormalPinIrqCount = 0;
+volatile uint32_t s_inputRcPinIrqCount   = 0;
+volatile uint32_t s_outputPinEdgePreCount = 0;
+volatile uint32_t s_outputPinEdgePostCount = 0;
 
 /*******************************************************************************
  * Prototypes
@@ -97,6 +103,70 @@ void BOARD_ReconfigFlexSpiRxBuffer(void)
     SCB_EnableICache();
 }
 
+void GPIO1_Combined_16_31_IRQHandler(void)
+{
+     /* clear the interrupt status */
+    if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
+        s_inputRcPinIrqCount++;
+        __DSB();
+    }
+    if ((GPIO1->ISR & (1U << 27)) && (GPIO1->IMR & (1U << 27)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO1, 1U << 27);
+        s_inputNormalPinIrqCount++;
+        __DSB();
+    }
+}
+
+static void delay_1s(void)
+{
+    volatile uint32_t i = 0;
+    for (i = 0; i < 33000000; ++i)
+    {
+        __NOP(); /* delay */
+    }
+}
+
+void test_gpio_irq(void)
+{
+    gpio_pin_config_t out_config = { kGPIO_DigitalOutput, 1, kGPIO_NoIntmode };
+    //pin that toggles every ms
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
+		GPIO_PinInit(GPIO1, 20, &out_config);
+		GPIO_PinWrite(GPIO1, 20, 0U);
+	}
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+		GPIO_PinInit(GPIO1, 21, &out_config);
+		GPIO_PinWrite(GPIO1, 21, 0U);
+	}
+
+	//init receive pin
+    // RC in - irq pin
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x011030U);
+		GPIO_PinInit(GPIO1, 26, &config);
+		GPIO_SetPinInterruptConfig(GPIO1, 26, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO1_Combined_16_31_IRQn);
+		GPIO_PortEnableInterrupts(GPIO1, 1U << 26);
+	}
+    // normal in
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 0x011030U);
+		GPIO_PinInit(GPIO1, 27, &config);
+		GPIO_SetPinInterruptConfig(GPIO1, 27, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO1_Combined_16_31_IRQn);
+		GPIO_PortEnableInterrupts(GPIO1, 1U << 27);
+	}
+}
+
 /*!
  * @brief Main function
  */
@@ -117,6 +187,11 @@ int main(void)
     BOARD_InitDebugConsole();
 
     PRINTF("lvgl bare metal widgets demo\r\n");
+
+    test_gpio_irq();
+    delay_1s();
+    s_inputRcPinIrqCount   = 0;
+    s_inputNormalPinIrqCount   = 0;
 
     DEMO_SetupTick();
 
@@ -153,6 +228,12 @@ static void DEMO_SetupTick(void)
 
 void SysTick_Handler(void)
 {
+    s_outputPinEdgePreCount++;
+    GPIO_PortToggle(GPIO1, 1 << 20);
+    GPIO_PortToggle(GPIO1, 1 << 21);
+    s_outputPinEdgePostCount++;
+    __DSB();
+
     s_tick++;
     lv_tick_inc(LVGL_TICK_MS);
 
