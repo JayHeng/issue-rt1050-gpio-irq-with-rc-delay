@@ -32,14 +32,20 @@
 static volatile uint32_t s_tick        = 0U;
 static volatile bool s_lvglTaskPending = false;
 
-#define MAX_RECORD_BUFFER (0x8000)
+#define MAX_RECORD_BUFFER (0x3000)
 
 uint32_t s_systickReloadVal = 0;
-volatile uint32_t s_systickCurVal = 0;
-volatile uint32_t s_systickLastVal = 0;
-volatile uint32_t s_systickCurCount = 0;
-volatile uint32_t s_systickLastCount = 0;
-uint32_t s_systickDelta[MAX_RECORD_BUFFER];
+volatile uint32_t s_systickCurVal0 = 0;
+volatile uint32_t s_systickLastVal0 = 0;
+volatile uint32_t s_systickCurCount0 = 0;
+volatile uint32_t s_systickLastCount0 = 0;
+uint32_t s_systickDelta0[MAX_RECORD_BUFFER];
+
+volatile uint32_t s_systickCurVal1 = 0;
+volatile uint32_t s_systickLastVal1 = 0;
+volatile uint32_t s_systickCurCount1 = 0;
+volatile uint32_t s_systickLastCount1 = 0;
+uint32_t s_systickDelta1[MAX_RECORD_BUFFER];
 
 volatile uint32_t s_inputNormalPinIrqCount = 0;
 volatile uint32_t s_inputRcPinIrqCount   = 0;
@@ -117,21 +123,29 @@ void GPIO1_Combined_16_31_IRQHandler(void)
      /* clear the interrupt status */
     if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
     {
-        s_systickCurVal = SysTick->VAL;
-        s_systickCurCount = s_outputPinEdgePostCount;
+        s_systickCurVal0 = SysTick->VAL;
+        s_systickCurCount0 = s_outputPinEdgePostCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
         if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
         {
-            s_systickDelta[s_inputRcPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount) * s_systickReloadVal + s_systickLastVal - s_systickCurVal;
-            s_systickLastVal = s_systickCurVal;
-            s_systickLastCount = s_systickCurCount;
+            s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
+            s_systickLastVal0 = s_systickCurVal0;
+            s_systickLastCount0 = s_systickCurCount0;
         }
         s_inputRcPinIrqCount++;
         __DSB();
     }
     if ((GPIO1->ISR & (1U << 27)) && (GPIO1->IMR & (1U << 27)))
     {
+        s_systickCurVal1 = SysTick->VAL;
+        s_systickCurCount1 = s_outputPinEdgePostCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 27);
+        if (s_inputNormalPinIrqCount < MAX_RECORD_BUFFER)
+        {
+            s_systickDelta1[s_inputNormalPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount1) * s_systickReloadVal + s_systickLastVal1 - s_systickCurVal1;
+            s_systickLastVal1 = s_systickCurVal1;
+            s_systickLastCount1 = s_systickCurCount1;
+        }
         s_inputNormalPinIrqCount++;
         __DSB();
     }
@@ -211,7 +225,8 @@ int main(void)
     s_inputNormalPinIrqCount   = 0;
 
     s_systickReloadVal = SystemCoreClock / (LVGL_TICK_MS * 1000U);
-    s_systickLastVal = s_systickReloadVal;
+    s_systickLastVal0 = s_systickReloadVal;
+    s_systickLastVal1 = s_systickReloadVal;
     DEMO_SetupTick();
 
 #if LV_USE_LOG
