@@ -32,7 +32,7 @@
 static volatile uint32_t s_tick        = 0U;
 static volatile bool s_lvglTaskPending = false;
 
-#define MAX_RECORD_BUFFER (0x3000)
+#define MAX_RECORD_BUFFER (0x8000)
 
 uint32_t s_systickReloadVal = 0;
 volatile uint32_t s_systickCurVal0 = 0;
@@ -228,6 +228,13 @@ int main(void)
     s_systickLastVal0 = s_systickReloadVal;
     s_systickLastVal1 = s_systickReloadVal;
     DEMO_SetupTick();
+    
+    //NVIC_SetPriority (GPIO1_Combined_16_31_IRQn, 3);
+    //NVIC_SetPriority (SysTick_IRQn, 0);
+    //NVIC_SetPriority (LCDIF_IRQn, 15);
+    //NVIC_SetPriority (PXP_IRQn, 15);
+    
+    //while(1);
 
 #if LV_USE_LOG
     lv_log_register_print_cb(print_cb);
@@ -238,6 +245,19 @@ int main(void)
     lv_port_disp_init();
     lv_port_indev_init();
     lv_demo_widgets();
+
+    // Additional test code
+    /*
+    {
+        NVIC_SetPriorityGrouping(0);
+        NVIC_SetPriority(GPIO1_Combined_16_31_IRQn, NVIC_EncodePriority(0,0,0));
+        NVIC_SetPriority(LCDIF_IRQn, NVIC_EncodePriority(0,15,0));
+        NVIC_SetPriority(PXP_IRQn, NVIC_EncodePriority(0,15,0));
+    }
+   */
+    
+    //DisableIRQ(LCDIF_IRQn);
+    //DisableIRQ(PXP_IRQn);
 
     for (;;)
     {

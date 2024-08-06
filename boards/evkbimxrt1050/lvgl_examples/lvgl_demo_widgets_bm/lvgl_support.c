@@ -221,6 +221,9 @@ void lv_port_disp_init(void)
     lv_disp_drv_register(&disp_drv);
 }
 
+volatile uint32_t s_lcdifIrqCount = 0;
+volatile uint32_t s_lcdifFrameCount = 0;
+
 void LCDIF_IRQHandler(void)
 {
 #if defined(SDK_OS_FREE_RTOS)
@@ -230,11 +233,13 @@ void LCDIF_IRQHandler(void)
     uint32_t intStatus = ELCDIF_GetInterruptStatus(LCDIF);
 
     ELCDIF_ClearInterruptStatus(LCDIF, intStatus);
+    s_lcdifIrqCount++;
 
     if (s_framePending)
     {
         if (intStatus & kELCDIF_CurFrameDone)
         {
+            s_lcdifFrameCount++;
             s_framePending = false;
 
 #if defined(SDK_OS_FREE_RTOS)
@@ -568,7 +573,7 @@ static void DEMO_InitTouch(void)
     if (status != kStatus_Success)
     {
         PRINTF("Touch panel init failed\n");
-        assert(0);
+        //assert(0);
     }
 }
 

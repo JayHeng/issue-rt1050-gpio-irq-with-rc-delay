@@ -98,14 +98,19 @@ static lv_nxp_pxp_cfg_t pxp_default_cfg = {
  *   GLOBAL FUNCTIONS
  **********************/
 
+volatile uint32_t s_pxpIrqCount = 0;
+volatile uint32_t s_pxpCompCount = 0;
+   
 void PXP_IRQHandler(void)
 {
 #if defined(SDK_OS_FREE_RTOS)
     BaseType_t taskAwake = pdFALSE;
 #endif
+    s_pxpIrqCount++;
 
     if(kPXP_CompleteFlag & PXP_GetStatusFlags(LV_GPU_NXP_PXP_ID)) {
         PXP_ClearStatusFlags(LV_GPU_NXP_PXP_ID, kPXP_CompleteFlag);
+        s_pxpCompCount++;
 #if defined(SDK_OS_FREE_RTOS)
         xSemaphoreGiveFromISR(s_pxpIdleSem, &taskAwake);
         portYIELD_FROM_ISR(taskAwake);
