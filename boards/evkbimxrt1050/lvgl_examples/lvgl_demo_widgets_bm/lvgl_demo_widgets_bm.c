@@ -32,6 +32,15 @@
 static volatile uint32_t s_tick        = 0U;
 static volatile bool s_lvglTaskPending = false;
 
+#define MAX_RECORD_BUFFER (0x8000)
+
+uint32_t s_systickReloadVal = 0;
+volatile uint32_t s_systickCurVal = 0;
+volatile uint32_t s_systickLastVal = 0;
+volatile uint32_t s_systickCurCount = 0;
+volatile uint32_t s_systickLastCount = 0;
+uint32_t s_systickDelta[MAX_RECORD_BUFFER];
+
 volatile uint32_t s_inputNormalPinIrqCount = 0;
 volatile uint32_t s_inputRcPinIrqCount   = 0;
 volatile uint32_t s_outputPinEdgePreCount = 0;
@@ -108,7 +117,15 @@ void GPIO1_Combined_16_31_IRQHandler(void)
      /* clear the interrupt status */
     if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
     {
+        s_systickCurVal = SysTick->VAL;
+        s_systickCurCount = s_outputPinEdgePostCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
+        if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
+        {
+            s_systickDelta[s_inputRcPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount) * s_systickReloadVal + s_systickLastVal - s_systickCurVal;
+            s_systickLastVal = s_systickCurVal;
+            s_systickLastCount = s_systickCurCount;
+        }
         s_inputRcPinIrqCount++;
         __DSB();
     }
@@ -193,6 +210,8 @@ int main(void)
     s_inputRcPinIrqCount   = 0;
     s_inputNormalPinIrqCount   = 0;
 
+    s_systickReloadVal = SystemCoreClock / (LVGL_TICK_MS * 1000U);
+    s_systickLastVal = s_systickReloadVal;
     DEMO_SetupTick();
 
 #if LV_USE_LOG
@@ -218,7 +237,7 @@ int main(void)
 
 static void DEMO_SetupTick(void)
 {
-    if (0 != SysTick_Config(SystemCoreClock / (LVGL_TICK_MS * 1000U)))
+    if (0 != SysTick_Config(s_systickReloadVal))
     {
         PRINTF("Tick initialization failed\r\n");
         while (1)
