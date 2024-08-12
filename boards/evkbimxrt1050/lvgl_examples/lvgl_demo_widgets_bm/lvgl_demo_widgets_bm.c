@@ -27,7 +27,7 @@
 #endif
 
 #define RC_PIN_TEST_ENABLE     (1)
-#define NORMAL_PIN_TEST_ENABLE (1)
+#define NORMAL_PIN_TEST_ENABLE (0)
 
 /*******************************************************************************
  * Variables
@@ -141,6 +141,10 @@ void GPIO1_Combined_16_31_IRQHandler(void)
             s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
             s_systickLastVal0 = s_systickCurVal0;
             s_systickLastCount0 = s_systickCurCount0;
+            if (s_systickDelta0[s_inputRcPinIrqCount] <= s_systickReloadVal / 2)
+            {
+                GPIO_PortToggle(GPIO1, 1 << 21);
+            }
         }
         s_inputRcPinIrqCount++;
         __DSB();
@@ -195,6 +199,12 @@ void test_gpio_irq(void)
 		EnableIRQ(GPIO1_Combined_16_31_IRQn);
 		GPIO_PortEnableInterrupts(GPIO1, 1U << 26);
 	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
 #endif
 
 #if NORMAL_PIN_TEST_ENABLE
