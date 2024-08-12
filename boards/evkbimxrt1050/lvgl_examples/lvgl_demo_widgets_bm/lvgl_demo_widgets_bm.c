@@ -58,8 +58,7 @@ uint32_t s_systickDelta1[MAX_RECORD_BUFFER];
 #endif
 
 uint32_t s_systickReloadVal = 0;
-volatile uint32_t s_outputPinEdgePreCount = 0;
-volatile uint32_t s_outputPinEdgePostCount = 0;
+volatile uint32_t s_outputPinEdgeCount = 0;
 
 /*******************************************************************************
  * Prototypes
@@ -134,11 +133,11 @@ void GPIO1_Combined_16_31_IRQHandler(void)
     if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
     {
         s_systickCurVal0 = SysTick->VAL;
-        s_systickCurCount0 = s_outputPinEdgePostCount;
+        s_systickCurCount0 = s_outputPinEdgeCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
         if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
         {
-            s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
+            s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
             s_systickLastVal0 = s_systickCurVal0;
             s_systickLastCount0 = s_systickCurCount0;
             if (s_systickDelta0[s_inputRcPinIrqCount] <= s_systickReloadVal / 2)
@@ -155,11 +154,11 @@ void GPIO1_Combined_16_31_IRQHandler(void)
     if ((GPIO1->ISR & (1U << 27)) && (GPIO1->IMR & (1U << 27)))
     {
         s_systickCurVal1 = SysTick->VAL;
-        s_systickCurCount1 = s_outputPinEdgePostCount;
+        s_systickCurCount1 = s_outputPinEdgeCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 27);
         if (s_inputNormalPinIrqCount < MAX_RECORD_BUFFER)
         {
-            s_systickDelta1[s_inputNormalPinIrqCount] = (s_outputPinEdgePostCount - s_systickLastCount1) * s_systickReloadVal + s_systickLastVal1 - s_systickCurVal1;
+            s_systickDelta1[s_inputNormalPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount1) * s_systickReloadVal + s_systickLastVal1 - s_systickCurVal1;
             s_systickLastVal1 = s_systickCurVal1;
             s_systickLastCount1 = s_systickCurCount1;
         }
@@ -186,6 +185,8 @@ void test_gpio_irq(void)
     // RC out
 	{
 		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
+        IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x001030U);
 		GPIO_PinInit(GPIO1, 20, &out_config);
 		GPIO_PinWrite(GPIO1, 20, 0U);
 	}
@@ -194,6 +195,7 @@ void test_gpio_irq(void)
 		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
 		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 1);
 		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x001030U);
 		GPIO_PinInit(GPIO1, 26, &config);
 		GPIO_SetPinInterruptConfig(GPIO1, 26, kGPIO_IntRisingOrFallingEdge);
 		EnableIRQ(GPIO1_Combined_16_31_IRQn);
@@ -315,14 +317,13 @@ static void DEMO_SetupTick(void)
 
 void SysTick_Handler(void)
 {
-    s_outputPinEdgePreCount++;
 #if RC_PIN_TEST_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 20);
 #endif
 #if NORMAL_PIN_TEST_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 21);
 #endif
-    s_outputPinEdgePostCount++;
+    s_outputPinEdgeCount++;
     __DSB();
 
     s_tick++;
