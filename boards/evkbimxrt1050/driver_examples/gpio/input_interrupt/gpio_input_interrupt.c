@@ -23,8 +23,9 @@
 #define EXAMPLE_GPIO_IRQHandler BOARD_USER_BUTTON_IRQ_HANDLER
 #define EXAMPLE_SW_NAME         BOARD_USER_BUTTON_NAME
 
-#define RC_PIN_TEST_ENABLE     (1)
-#define NORMAL_PIN_TEST_ENABLE (1)
+#define RC_PIN_TEST_AD_B1_PAD_ENABLE     (0)
+#define RC_PIN_TEST_SD_B0_PAD_ENABLE     (1)
+#define NORMAL_PIN_TEST_ENABLE  (0)
 
 /*******************************************************************************
  * Prototypes
@@ -39,7 +40,7 @@ static void delay_1s(void);
  ******************************************************************************/
 #define MAX_RECORD_BUFFER (0x3000)
 
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
 volatile uint32_t s_inputRcPinIrqCount   = 0;
 
 volatile uint32_t s_systickCurVal0 = 0;
@@ -68,8 +69,10 @@ volatile uint32_t s_outputPinEdgeCount = 0;
 
 void SysTick_Handler(void)
 {
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 20);
+#elif RC_PIN_TEST_SD_B0_PAD_ENABLE
+    GPIO_PortToggle(GPIO3, 1 << 15);
 #endif
 #if NORMAL_PIN_TEST_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 21);
@@ -78,21 +81,30 @@ void SysTick_Handler(void)
     __DSB();
 }
 
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
+void calc_delta0_tick(void)
+{
+    if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
+    {
+        s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
+        s_systickLastVal0 = s_systickCurVal0;
+        s_systickLastCount0 = s_systickCurCount0;
+        if (s_systickDelta0[s_inputRcPinIrqCount] <= s_systickReloadVal / 2)
+        {
+            GPIO_PortToggle(GPIO1, 1 << 21);
+        }
+    }
+}
+#endif
+
 void GPIO1_Combined_16_31_IRQHandler(void)
 {
      /* clear the interrupt status */
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
     if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
     {
-        s_systickCurVal0 = SysTick->VAL;
-        s_systickCurCount0 = s_outputPinEdgeCount;
         GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
-        if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
-        {
-            s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
-            s_systickLastVal0 = s_systickCurVal0;
-            s_systickLastCount0 = s_systickCurCount0;
-        }
+        calc_delta0_tick();
         s_inputRcPinIrqCount++;
         __DSB();
     }
@@ -115,11 +127,25 @@ void GPIO1_Combined_16_31_IRQHandler(void)
 #endif
 }
 
+void GPIO3_Combined_0_15_IRQHandler(void)
+{
+     /* clear the interrupt status */
+#if RC_PIN_TEST_SD_B0_PAD_ENABLE
+    if ((GPIO3->ISR & (1U << 13)) && (GPIO3->IMR & (1U << 13)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO3, 1U << 13);
+        calc_delta0_tick();
+        s_inputRcPinIrqCount++;
+        __DSB();
+    }
+#endif
+}
+
 void test_gpio_irq(void)
 {
     gpio_pin_config_t out_config = { kGPIO_DigitalOutput, 1, kGPIO_NoIntmode };
     //pin that toggles every ms
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
     // RC out - systick drive
 	{
 		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
@@ -136,6 +162,36 @@ void test_gpio_irq(void)
 		EnableIRQ(GPIO1_Combined_16_31_IRQn);
 		GPIO_PortEnableInterrupts(GPIO1, 1U << 26);
 	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
+#elif RC_PIN_TEST_SD_B0_PAD_ENABLE
+    // RC out
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_SD_B0_03_GPIO3_IO15, 0);
+        IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_03_GPIO3_IO15, 0x011030U);
+		GPIO_PinInit(GPIO3, 15, &out_config);
+		GPIO_PinWrite(GPIO3, 15, 0U);
+	}
+    // RC in - irq pin
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_SD_B0_01_GPIO3_IO13, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_01_GPIO3_IO13, 0x011030U);
+		GPIO_PinInit(GPIO3, 13, &config);
+		GPIO_SetPinInterruptConfig(GPIO3, 13, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO3_Combined_0_15_IRQn);
+		GPIO_PortEnableInterrupts(GPIO3, 1U << 13);
+	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
 #endif
 #if NORMAL_PIN_TEST_ENABLE
     // normal out
@@ -163,7 +219,7 @@ void test_gpio_irq(void)
 
     /* Set systick reload value to generate 1ms interrupt */
     s_systickReloadVal = SystemCoreClock / 1000U;
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
     s_inputRcPinIrqCount   = 0;
     s_systickLastVal0 = s_systickReloadVal;
 #endif

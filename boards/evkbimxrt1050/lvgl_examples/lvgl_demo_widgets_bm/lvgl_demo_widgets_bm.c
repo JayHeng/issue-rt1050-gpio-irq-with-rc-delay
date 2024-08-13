@@ -26,8 +26,9 @@
 #define LVGL_TASK_PERIOD_TICK 5U
 #endif
 
-#define RC_PIN_TEST_ENABLE     (1)
-#define NORMAL_PIN_TEST_ENABLE (0)
+#define RC_PIN_TEST_AD_B1_PAD_ENABLE     (0)
+#define RC_PIN_TEST_SD_B0_PAD_ENABLE     (1)
+#define NORMAL_PIN_TEST_ENABLE  (0)
 
 /*******************************************************************************
  * Variables
@@ -37,7 +38,7 @@ static volatile bool s_lvglTaskPending = false;
 
 #define MAX_RECORD_BUFFER (0x8000)
 
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
 volatile uint32_t s_inputRcPinIrqCount   = 0;
 
 volatile uint32_t s_systickCurVal0 = 0;
@@ -72,6 +73,154 @@ static void print_cb(const char *buf);
  * Code
  ******************************************************************************/
 AT_QUICKACCESS_SECTION_CODE(void BOARD_ReconfigFlexSpiRxBuffer(void));
+
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
+void calc_delta0_tick(void)
+{
+    if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
+    {
+        s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
+        s_systickLastVal0 = s_systickCurVal0;
+        s_systickLastCount0 = s_systickCurCount0;
+        if (s_systickDelta0[s_inputRcPinIrqCount] <= s_systickReloadVal / 2)
+        {
+            GPIO_PortToggle(GPIO1, 1 << 21);
+        }
+    }
+}
+#endif
+
+void GPIO1_Combined_16_31_IRQHandler(void)
+{
+     /* clear the interrupt status */
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
+    if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
+        calc_delta0_tick();
+        s_inputRcPinIrqCount++;
+        __DSB();
+    }
+#endif
+
+#if NORMAL_PIN_TEST_ENABLE
+    if ((GPIO1->ISR & (1U << 27)) && (GPIO1->IMR & (1U << 27)))
+    {
+        s_systickCurVal1 = SysTick->VAL;
+        s_systickCurCount1 = s_outputPinEdgeCount;
+        GPIO_PortClearInterruptFlags(GPIO1, 1U << 27);
+        if (s_inputNormalPinIrqCount < MAX_RECORD_BUFFER)
+        {
+            s_systickDelta1[s_inputNormalPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount1) * s_systickReloadVal + s_systickLastVal1 - s_systickCurVal1;
+            s_systickLastVal1 = s_systickCurVal1;
+            s_systickLastCount1 = s_systickCurCount1;
+        }
+        s_inputNormalPinIrqCount++;
+        __DSB();
+    }
+#endif
+}
+
+void GPIO3_Combined_0_15_IRQHandler(void)
+{
+     /* clear the interrupt status */
+#if RC_PIN_TEST_SD_B0_PAD_ENABLE
+    if ((GPIO3->ISR & (1U << 13)) && (GPIO3->IMR & (1U << 13)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO3, 1U << 13);
+        calc_delta0_tick();
+        s_inputRcPinIrqCount++;
+        __DSB();
+    }
+#endif
+}
+
+static void delay_1s(void)
+{
+    volatile uint32_t i = 0;
+    for (i = 0; i < 33000000; ++i)
+    {
+        __NOP(); /* delay */
+    }
+}
+
+void test_gpio_irq(void)
+{
+    gpio_pin_config_t out_config = { kGPIO_DigitalOutput, 1, kGPIO_NoIntmode };
+    //pin that toggles every ms
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
+    // RC out
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
+        IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x001030U);
+		GPIO_PinInit(GPIO1, 20, &out_config);
+		GPIO_PinWrite(GPIO1, 20, 0U);
+	}
+    // RC in - irq pin
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x001030U);
+		GPIO_PinInit(GPIO1, 26, &config);
+		GPIO_SetPinInterruptConfig(GPIO1, 26, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO1_Combined_16_31_IRQn);
+		GPIO_PortEnableInterrupts(GPIO1, 1U << 26);
+	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
+#elif RC_PIN_TEST_SD_B0_PAD_ENABLE
+    // RC out
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_SD_B0_03_GPIO3_IO15, 0);
+        IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_03_GPIO3_IO15, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_03_GPIO3_IO15, 0x001030U);
+		GPIO_PinInit(GPIO3, 15, &out_config);
+		GPIO_PinWrite(GPIO3, 15, 0U);
+	}
+    // RC in - irq pin
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_SD_B0_01_GPIO3_IO13, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_01_GPIO3_IO13, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_SD_B0_01_GPIO3_IO13, 0x001030U);
+		GPIO_PinInit(GPIO3, 13, &config);
+		GPIO_SetPinInterruptConfig(GPIO3, 13, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO3_Combined_0_15_IRQn);
+		GPIO_PortEnableInterrupts(GPIO3, 1U << 13);
+	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
+#endif
+
+#if NORMAL_PIN_TEST_ENABLE
+    // normal out
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+		GPIO_PinInit(GPIO1, 21, &out_config);
+		GPIO_PinWrite(GPIO1, 21, 0U);
+	}
+    // normal in
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 0x011030U);
+		GPIO_PinInit(GPIO1, 27, &config);
+		GPIO_SetPinInterruptConfig(GPIO1, 27, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO1_Combined_16_31_IRQn);
+		GPIO_PortEnableInterrupts(GPIO1, 1U << 27);
+	}
+#endif
+}
 
 /*
  * When PXP fetch images from FlexSPI flash, the default FlexSPI RX buffer
@@ -126,109 +275,6 @@ void BOARD_ReconfigFlexSpiRxBuffer(void)
     SCB_EnableICache();
 }
 
-void GPIO1_Combined_16_31_IRQHandler(void)
-{
-     /* clear the interrupt status */
-#if RC_PIN_TEST_ENABLE
-    if ((GPIO1->ISR & (1U << 26)) && (GPIO1->IMR & (1U << 26)))
-    {
-        s_systickCurVal0 = SysTick->VAL;
-        s_systickCurCount0 = s_outputPinEdgeCount;
-        GPIO_PortClearInterruptFlags(GPIO1, 1U << 26);
-        if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
-        {
-            s_systickDelta0[s_inputRcPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount0) * s_systickReloadVal + s_systickLastVal0 - s_systickCurVal0;
-            s_systickLastVal0 = s_systickCurVal0;
-            s_systickLastCount0 = s_systickCurCount0;
-            if (s_systickDelta0[s_inputRcPinIrqCount] <= s_systickReloadVal / 2)
-            {
-                GPIO_PortToggle(GPIO1, 1 << 21);
-            }
-        }
-        s_inputRcPinIrqCount++;
-        __DSB();
-    }
-#endif
-
-#if NORMAL_PIN_TEST_ENABLE
-    if ((GPIO1->ISR & (1U << 27)) && (GPIO1->IMR & (1U << 27)))
-    {
-        s_systickCurVal1 = SysTick->VAL;
-        s_systickCurCount1 = s_outputPinEdgeCount;
-        GPIO_PortClearInterruptFlags(GPIO1, 1U << 27);
-        if (s_inputNormalPinIrqCount < MAX_RECORD_BUFFER)
-        {
-            s_systickDelta1[s_inputNormalPinIrqCount] = (s_outputPinEdgeCount - s_systickLastCount1) * s_systickReloadVal + s_systickLastVal1 - s_systickCurVal1;
-            s_systickLastVal1 = s_systickCurVal1;
-            s_systickLastCount1 = s_systickCurCount1;
-        }
-        s_inputNormalPinIrqCount++;
-        __DSB();
-    }
-#endif
-}
-
-static void delay_1s(void)
-{
-    volatile uint32_t i = 0;
-    for (i = 0; i < 33000000; ++i)
-    {
-        __NOP(); /* delay */
-    }
-}
-
-void test_gpio_irq(void)
-{
-    gpio_pin_config_t out_config = { kGPIO_DigitalOutput, 1, kGPIO_NoIntmode };
-    //pin that toggles every ms
-#if RC_PIN_TEST_ENABLE
-    // RC out
-	{
-		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
-        IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x011030U);
-        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0x001030U);
-		GPIO_PinInit(GPIO1, 20, &out_config);
-		GPIO_PinWrite(GPIO1, 20, 0U);
-	}
-    // RC in - irq pin
-	{
-		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
-		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 1);
-		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x011030U);
-        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_10_GPIO1_IO26, 0x001030U);
-		GPIO_PinInit(GPIO1, 26, &config);
-		GPIO_SetPinInterruptConfig(GPIO1, 26, kGPIO_IntRisingOrFallingEdge);
-		EnableIRQ(GPIO1_Combined_16_31_IRQn);
-		GPIO_PortEnableInterrupts(GPIO1, 1U << 26);
-	}
-
-    {
-        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
-        GPIO_PinInit(GPIO1, 21, &out_config);
-        GPIO_PinWrite(GPIO1, 21, 0U);
-    }
-#endif
-
-#if NORMAL_PIN_TEST_ENABLE
-    // normal out
-	{
-		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
-		GPIO_PinInit(GPIO1, 21, &out_config);
-		GPIO_PinWrite(GPIO1, 21, 0U);
-	}
-    // normal in
-	{
-		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
-		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 1);
-		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B1_11_GPIO1_IO27, 0x011030U);
-		GPIO_PinInit(GPIO1, 27, &config);
-		GPIO_SetPinInterruptConfig(GPIO1, 27, kGPIO_IntRisingOrFallingEdge);
-		EnableIRQ(GPIO1_Combined_16_31_IRQn);
-		GPIO_PortEnableInterrupts(GPIO1, 1U << 27);
-	}
-#endif
-}
-
 /*!
  * @brief Main function
  */
@@ -254,7 +300,7 @@ int main(void)
     delay_1s();
 
     s_systickReloadVal = SystemCoreClock / (LVGL_TICK_MS * 1000U);
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
     s_inputRcPinIrqCount   = 0;
     s_systickLastVal0 = s_systickReloadVal;
 #endif
@@ -317,8 +363,10 @@ static void DEMO_SetupTick(void)
 
 void SysTick_Handler(void)
 {
-#if RC_PIN_TEST_ENABLE
+#if RC_PIN_TEST_AD_B1_PAD_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 20);
+#elif RC_PIN_TEST_SD_B0_PAD_ENABLE
+    GPIO_PortToggle(GPIO3, 1 << 15);
 #endif
 #if NORMAL_PIN_TEST_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 21);
