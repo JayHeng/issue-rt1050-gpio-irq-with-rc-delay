@@ -26,6 +26,7 @@
 #define LVGL_TASK_PERIOD_TICK 5U
 #endif
 
+#define RC_PIN_TEST_AD_B0_PAD_ENABLE     (0)
 #define RC_PIN_TEST_AD_B1_PAD_ENABLE     (0)
 #define RC_PIN_TEST_SD_B0_PAD_ENABLE     (1)
 #define NORMAL_PIN_TEST_ENABLE  (0)
@@ -38,7 +39,9 @@ static volatile bool s_lvglTaskPending = false;
 
 #define MAX_RECORD_BUFFER (0x8000)
 
-#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE || \
+    RC_PIN_TEST_AD_B1_PAD_ENABLE || \
+    RC_PIN_TEST_SD_B0_PAD_ENABLE
 volatile uint32_t s_inputRcPinIrqCount   = 0;
 
 volatile uint32_t s_systickCurVal0 = 0;
@@ -74,7 +77,9 @@ static void print_cb(const char *buf);
  ******************************************************************************/
 AT_QUICKACCESS_SECTION_CODE(void BOARD_ReconfigFlexSpiRxBuffer(void));
 
-#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE || \
+    RC_PIN_TEST_AD_B1_PAD_ENABLE || \
+    RC_PIN_TEST_SD_B0_PAD_ENABLE
 void calc_delta0_tick(void)
 {
     if (s_inputRcPinIrqCount < MAX_RECORD_BUFFER)
@@ -89,6 +94,20 @@ void calc_delta0_tick(void)
     }
 }
 #endif
+
+void GPIO1_Combined_0_15_IRQHandler(void)
+{
+     /* clear the interrupt status */
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE
+    if ((GPIO1->ISR & (1U << 13)) && (GPIO1->IMR & (1U << 13)))
+    {
+        GPIO_PortClearInterruptFlags(GPIO1, 1U << 13);
+        calc_delta0_tick();
+        s_inputRcPinIrqCount++;
+        __DSB();
+    }
+#endif
+}
 
 void GPIO1_Combined_16_31_IRQHandler(void)
 {
@@ -148,7 +167,34 @@ void test_gpio_irq(void)
 {
     gpio_pin_config_t out_config = { kGPIO_DigitalOutput, 1, kGPIO_NoIntmode };
     //pin that toggles every ms
-#if RC_PIN_TEST_AD_B1_PAD_ENABLE
+    
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE
+    // RC out
+	{
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B0_12_GPIO1_IO12, 0);
+        IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_12_GPIO1_IO12, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_12_GPIO1_IO12, 0x001030U);
+		GPIO_PinInit(GPIO1, 12, &out_config);
+		GPIO_PinWrite(GPIO1, 12, 0U);
+	}
+    // RC in - irq pin
+	{
+		gpio_pin_config_t config = { kGPIO_DigitalInput, 1, kGPIO_NoIntmode };
+		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B0_13_GPIO1_IO13, 1);
+		IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_13_GPIO1_IO13, 0x011030U);
+        //IOMUXC_SetPinConfig(IOMUXC_GPIO_AD_B0_13_GPIO1_IO13, 0x001030U);
+		GPIO_PinInit(GPIO1, 13, &config);
+		GPIO_SetPinInterruptConfig(GPIO1, 13, kGPIO_IntRisingOrFallingEdge);
+		EnableIRQ(GPIO1_Combined_0_15_IRQn);
+		GPIO_PortEnableInterrupts(GPIO1, 1U << 13);
+	}
+
+    {
+        IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_05_GPIO1_IO21, 0);
+        GPIO_PinInit(GPIO1, 21, &out_config);
+        GPIO_PinWrite(GPIO1, 21, 0U);
+    }
+#elif RC_PIN_TEST_AD_B1_PAD_ENABLE
     // RC out
 	{
 		IOMUXC_SetPinMux(IOMUXC_GPIO_AD_B1_04_GPIO1_IO20, 0);
@@ -300,7 +346,9 @@ int main(void)
     delay_1s();
 
     s_systickReloadVal = SystemCoreClock / (LVGL_TICK_MS * 1000U);
-#if RC_PIN_TEST_AD_B1_PAD_ENABLE || RC_PIN_TEST_SD_B0_PAD_ENABLE
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE || \
+    RC_PIN_TEST_AD_B1_PAD_ENABLE || \
+    RC_PIN_TEST_SD_B0_PAD_ENABLE
     s_inputRcPinIrqCount   = 0;
     s_systickLastVal0 = s_systickReloadVal;
 #endif
@@ -363,7 +411,9 @@ static void DEMO_SetupTick(void)
 
 void SysTick_Handler(void)
 {
-#if RC_PIN_TEST_AD_B1_PAD_ENABLE
+#if RC_PIN_TEST_AD_B0_PAD_ENABLE
+    GPIO_PortToggle(GPIO1, 1 << 12);
+#elif RC_PIN_TEST_AD_B1_PAD_ENABLE
     GPIO_PortToggle(GPIO1, 1 << 20);
 #elif RC_PIN_TEST_SD_B0_PAD_ENABLE
     GPIO_PortToggle(GPIO3, 1 << 15);
